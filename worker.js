@@ -1,20 +1,24 @@
 // Standalone Cloudflare Worker — paste this into the Worker editor (Quick Edit).
 // Handles two jobs, both by POST to the same URL:
 //   1. Claude proxy  — default (body has messages/prompt/system)
-//   2. Notion logger — body { kind:'notion', type:'lookup'|'dish', ... }
+//   2. Notion logger — body { kind:'notion', type:'lookup'|'dish'|'contact', ... }
 //
 // Secrets / vars to set in  Worker → Settings → Variables and Secrets:
 //   ANTHROPIC_API_KEY  = sk-ant-...            (secret)
 //   NOTION_TOKEN       = ntn_...               (secret)  Notion integration token
 //   NOTION_DB_LOOKUPS  = <database id>         (plain)   "Is this anti-inflammatory?" log
 //   NOTION_DB_DISHES   = <database id>         (plain)   dishes added in Browse
-//   NOTION_DB_CONTACT  = <database id>         (plain)   contact-form messages
+//   NOTION_DB_CONTACT  = <database id>         (plain)   contact form + skill downloads
 //
 // The Notion logger inspects each database's real schema and only writes the
 // title plus whatever optional columns actually exist, so missing columns are
-// skipped instead of erroring. Recommended (optional) columns:
-//   Lookups: Verdict (text), Notes (text), When (date)
-//   Dishes:  Category (text), Added (date)
+// skipped instead of erroring. Recommended columns per database:
+//   Lookups: title (any name), Verdict (text), Notes (text), When (date)
+//   Dishes:  title (any name), Category (text), Added (date)
+//   Contact: TITLE column named "Name", plus Email (email OR text),
+//            Message (text), Visitor (text), When (date).
+//            Keep NAME and EMAIL as two separate columns — do not name the
+//            title column "Email".
 
 const NOTION_VERSION = '2022-06-28';
 
@@ -66,8 +70,11 @@ async function handleClaude(body, env, cors) {
 async function handleNotion(body, env, cors) {
   if (!env.NOTION_TOKEN) return json({ error: 'NOTION_TOKEN not set' }, 500, cors);
 
-  const dbId = body.type === 'dish' ? env.NOTION_DB_DISHES : (body.type === 'contact' ? env.NOTION_DB_CONTACT : env.NOTION_DB_LOOKUPS);
-  if (!dbId) return json({ error: (body.type === 'dish' ? 'NOTION_DB_DISHES' : body.type === 'contact' ? 'NOTION_DB_CONTACT' : 'NOTION_DB_LOOKUPS') + ' not set' }, 500, cors);
+  const dbVar = body.type === 'dish' ? 'NOTION_DB_DISHES'
+    : (body.type === 'contact' || body.type === 'signup') ? 'NOTION_DB_CONTACT'
+    : 'NOTION_DB_LOOKUPS';
+  const dbId = env[dbVar];
+  if (!dbId) return json({ error: dbVar + ' not set' }, 500, cors);
 
   const headers = {
     'content-type': 'application/json',
@@ -90,19 +97,24 @@ async function handleNotion(body, env, cors) {
   const has = (name, type) => props[name] && props[name].type === type;
 
   // primary title + the optional fields we'd like to fill
-  const primary = body.type === 'dish' ? (body.name || 'Untitled') : (body.type === 'contact' ? (body.name || body.contactEmail || 'Contact') : (body.query || 'Untitled'));
+  const primary = body.type === 'dish' ? (body.name || 'Untitled')
+    : body.type === 'contact' ? (body.name || 'Anonymous')
+    : body.type === 'signup' ? 'Signed up'
+    : (body.query || 'Untitled');
   const wanted = body.type === 'dish'
-    ? { Category: body.category, Email: body.email, Visitor: body.visitor }
+    ? { Category: body.category }
     : body.type === 'contact'
-    ? { Message: body.message, Email: body.contactEmail || body.email, Visitor: body.visitor }
-    : { Verdict: body.verdict, Notes: body.rationale, Email: body.email, Visitor: body.visitor };
+    ? { Email: body.contactEmail || body.email, Message: body.message, Visitor: body.visitor }
+    : body.type === 'signup'
+    ? { Email: body.email, Message: 'Checker signup', Visitor: body.visitor }
+    : { Verdict: body.verdict, Notes: body.rationale, Visitor: body.visitor };
 
   const properties = { [titleKey]: { title: [{ text: { content: String(primary).slice(0, 200) } }] } };
   for (const [name, val] of Object.entries(wanted)) {
     if (val == null || val === '') continue;
-    if (has(name, 'rich_text')) properties[name] = { rich_text: [{ text: { content: String(val).slice(0, 1900) } }] };
+    if (has(name, 'email')) properties[name] = { email: String(val).slice(0, 200) };
+    else if (has(name, 'rich_text')) properties[name] = { rich_text: [{ text: { content: String(val).slice(0, 1900) } }] };
     else if (has(name, 'select')) properties[name] = { select: { name: String(val).slice(0, 100) } };
-    else if (has(name, 'email')) properties[name] = { email: String(val).slice(0, 200) };
   }
   // fill a date column if one exists (any of these names), else rely on Notion's created time
   const now = new Date().toISOString();
