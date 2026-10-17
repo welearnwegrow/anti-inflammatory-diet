@@ -1,19 +1,32 @@
 {
-  "name": "Anti-Inflammatory Diet",
-  "short_name": "AntiInflam",
+  "id": "./",
+  "name": "An Anti-Inflammatory Diet",
+  "short_name": "Anti-Inflam",
+  "description": "Foods to enjoy and avoid, daily meals, recipes, a pantry list and a private health tracker.",
+  "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#FDFCF9",
   "theme_color": "#1E6E4B",
+  "lang": "en",
+  "categories": [
+    "health",
+    "food",
+    "lifestyle"
+  ],
   "icons": [
     {
       "src": "icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }
